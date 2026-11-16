@@ -268,6 +268,17 @@
     C.lines($('chart-laps'), S.selected.map((n) => ({ ...st.get(n),
       points: sel.filter((l) => l.driver_number === n && (slow || (!l.is_pit_out_lap && l.lap_duration <= cut))).sort((a, b) => a.lap_number - b.lap_number).map((l) => ({ x: l.lap_number, y: l.lap_duration })) })),
     { height: 320, yFmt: fmtLap, xFmt: (v) => String(Math.round(v)), xTip: (v) => 'Lap ' + v, xTitle: 'Lap', aria: 'Lap times by lap for the chosen drivers', empty: S.selected.length ? 'No timed laps for these drivers.' : 'Choose a driver above.' });
+    /* gap to leader, from each driver's lap start times */
+    $('panel-gaps').hidden = !D.isRace;
+    if (D.isRace) {
+      legend('legend-gaps', lg);
+      const starts = D.laps.filter((l) => l.date_start && l.lap_number > 1).map((l) => ({ n: l.driver_number, lap: l.lap_number, t: +pd(l.date_start) }));
+      const lead = d3.rollup(starts, (v) => d3.min(v, (x) => x.t), (x) => x.lap);
+      const gs = S.selected.map((n) => ({ ...st.get(n), points: starts.filter((x) => x.n === n).sort((p, q) => p.lap - q.lap).map((x) => ({ x: x.lap - 1, y: (x.t - lead.get(x.lap)) / 1000 })) }));
+      const worst = d3.max(gs.flatMap((s) => s.points), (p) => p.y) || 1;
+      C.lines($('chart-gaps'), gs, { height: 320, invertY: true, yDomain: [0, worst], yFmt: (v) => v === 0 ? 'Leader' : '+' + v.toFixed(v < 10 ? 1 : 0) + ' s', xFmt: (v) => String(Math.round(v)), xTip: (v) => 'After lap ' + v, xTitle: 'Laps completed',
+        aria: 'Gap to the race leader by lap for the chosen drivers', empty: S.selected.length ? 'No lap timing for these drivers.' : 'Choose a driver above.' });
+    }
     /* positions */
     $('panel-positions').hidden = !D.isRace || !D.pos.length;
     if (D.isRace && D.pos.length) {
@@ -301,6 +312,7 @@
   const tel = { loadedFor: null, last: null };
   const METRICS = [
     { key: 'speed', label: 'Speed', unit: 'km/h', h: 190, fmt: (v) => Math.round(v) + '' },
+    { key: 'delta', label: 'Time gap', unit: 's', h: 120, single: true, fmt: (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(3) },
     { key: 'throttle', label: 'Throttle', unit: '%', h: 100, dom: [0, 100], ticks: [0, 50, 100], fmt: (v) => Math.round(v) + '%' },
     { key: 'brake', label: 'Brake', unit: '', h: 70, dom: [0, 100], ticks: [0, 100], step: true, fmt: (v) => v >= 50 ? 'On' : 'Off' },
     { key: 'n_gear', label: 'Gear', unit: '', h: 100, dom: [0, 8], ticks: [0, 2, 4, 6, 8], step: true, fmt: (v) => String(Math.round(v)) },
@@ -363,6 +375,17 @@
     if (!A.rows.length) { C.note(box, 'OpenF1 has no car data for this lap. Try another lap.'); C.note($('tel-map'), ''); $('tel-tiles').replaceChildren(); return; }
     const sets = [{ L: A, color: colA }].concat(B && B.rows.length ? [{ L: B, color: colB }] : []);
     const nm = (L) => dcode(L.d, L.n) + ' lap ' + L.lap.lap_number;
+    /* time gap: B's elapsed time minus A's at the same point on the lap (B's distance scaled to A's lap length) */
+    const two = sets.length > 1;
+    if (two) {
+      const k = B.rows[B.rows.length - 1].dist / (A.rows[A.rows.length - 1].dist || 1), bd = d3.bisector((r) => r.dist).left;
+      A.rows.forEach((r) => {
+        const d = r.dist * k, i = Math.min(B.rows.length - 1, Math.max(1, bd(B.rows, d))), p = B.rows[i - 1], q = B.rows[i];
+        const tb = p.t + (q.dist > p.dist ? (d - p.dist) / (q.dist - p.dist) : 0) * (q.t - p.t);
+        r.delta = ((tb - B.rows[0].t) - (r.t - A.rows[0].t)) / 1000;
+      });
+    } else A.rows.forEach((r) => { r.delta = null; });
+    const shown = METRICS.filter((M) => !M.single || two);
     /* tiles */
     const tiles = $('tel-tiles'); tiles.replaceChildren();
     const stat = (L) => ({ lap: L.lap.lap_duration, top: d3.max(L.rows, (r) => r.speed), avg: d3.mean(L.rows, (r) => r.speed),
@@ -377,18 +400,20 @@
     const handles = []; let map = { setDist() {} };
     const bis = d3.bisector((r) => r.dist).center;
     const xMax = d3.max(sets, (s) => s.L.rows[s.L.rows.length - 1].dist);
-    METRICS.forEach((M, mi) => {
-      const row = el('div', 'tel-row'); row.appendChild(el('h3', '', M.label + (M.unit ? ' (' + M.unit + ')' : '')));
+    shown.forEach((M, mi) => {
+      const row = el('div', 'tel-row'); row.appendChild(el('h3', '', M.single ? 'Time gap (s): above zero, ' + dcode(A.d, A.n) + ' is ahead of ' + dcode(B.d, B.n) : M.label + (M.unit ? ' (' + M.unit + ')' : '')));
+      const use = M.single ? [{ L: A, color: '#eef0f3' }] : sets;
+      const dext = M.single ? d3.extent(A.rows, (r) => r.delta) : null;
       const ch = el('div', 'chart'); ch.style.minHeight = M.h + 'px'; row.appendChild(ch); box.appendChild(row);
-      handles.push(C.lines(ch, sets.map((s) => ({ name: nm(s.L), color: s.color, points: s.L.rows.filter((r) => r[M.key] != null).map((r) => ({ x: r.dist, y: r[M.key] })) })), {
-        height: M.h, left: 52, yDomain: M.dom, yTickValues: M.ticks, yTicks: 4, yFmt: M.fmt, step: M.step, labels: false, tip: false, xDomain: [0, xMax],
-        xFmt: (v) => d3.format(',')(Math.round(v)) + ' m', xTitle: mi === METRICS.length - 1 ? 'Distance into the lap' : null,
+      handles.push(C.lines(ch, use.map((s) => ({ name: nm(s.L), color: s.color, points: s.L.rows.filter((r) => r[M.key] != null).map((r) => ({ x: r.dist, y: r[M.key] })) })), {
+        height: M.h, left: 52, zero: M.single, yDomain: M.single ? [Math.min(0, dext[0]), Math.max(0, dext[1])] : M.dom, yTickValues: M.ticks, yTicks: 4, yFmt: M.fmt, step: M.step, labels: false, tip: false, xDomain: [0, xMax],
+        xFmt: (v) => d3.format(',')(Math.round(v)) + ' m', xTitle: mi === shown.length - 1 ? 'Distance into the lap' : null,
         aria: M.label + ' by distance into the lap', empty: 'No ' + M.label.toLowerCase() + ' data.',
         onX: (x, ev) => {
           handles.forEach((h) => h.setX(x)); map.setDist(x);
           if (x == null) return C.hideTip();
           const rows = [];
-          METRICS.forEach((Q) => sets.forEach((s) => { const r = s.L.rows[bis(s.L.rows, x)]; if (r && r[Q.key] != null) rows.push({ label: Q.label + (sets.length > 1 ? ' ' + dcode(s.L.d, s.L.n) : ''), value: Q.fmt(r[Q.key]) + (Q.unit && Q.unit !== '%' ? ' ' + Q.unit : ''), color: s.color }); }));
+          shown.forEach((Q) => (Q.single ? [{ L: A, color: '#eef0f3' }] : sets).forEach((s) => { const r = s.L.rows[bis(s.L.rows, x)]; if (r && r[Q.key] != null) rows.push({ label: Q.label + (sets.length > 1 && !Q.single ? ' ' + dcode(s.L.d, s.L.n) : ''), value: Q.fmt(r[Q.key]) + (Q.unit && Q.unit !== '%' ? ' ' + Q.unit : ''), color: s.color }); }));
           C.showTip(ev, d3.format(',')(Math.round(x)) + ' m into the lap', rows);
         } }));
     });

@@ -90,6 +90,7 @@
     const gx = svg.append('g');
     gx.selectAll('text').data(xt).join('text').attr('x', x).attr('y', H - m.b + 16).attr('text-anchor', 'middle').text(xFmt);
     if (opts.xTitle) gx.append('text').attr('x', (m.l + W - m.r) / 2).attr('y', H - 4).attr('text-anchor', 'middle').text(opts.xTitle);
+    if (opts.zero && y.domain()[0] * y.domain()[1] <= 0) g.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', '#8a919d');
     const line = d3.line().defined((p) => p.y != null).x((p) => x(p.x)).y((p) => y(p.y));
     if (opts.step) line.curve(d3.curveStepAfter);
     const ordered = series.filter((s) => s.muted).concat(named);
