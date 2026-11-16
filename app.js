@@ -283,17 +283,26 @@
     $('panel-positions').hidden = !D.isRace || !D.pos.length;
     if (D.isRace && D.pos.length) {
       legend('legend-pos', lg);
-      const t0 = d3.min(D.pos, (p) => +pd(p.date)), t1 = d3.max(D.pos, (p) => +pd(p.date));
+      /* The position feed opens long before lights out, so start the clock at the race start:
+         the earliest lap 1 start, else lap 2 start less lap 1's time, else the scheduled start. */
+      const l1 = d3.min(D.laps.filter((l) => l.lap_number === 1 && l.date_start), (l) => +pd(l.date_start));
+      const l2 = d3.min(D.laps.filter((l) => l.lap_number === 2 && l.date_start), (l) => +pd(l.date_start));
+      const d1 = d3.median(D.laps.filter((l) => l.lap_number === 1 && l.lap_duration != null), (l) => l.lap_duration);
+      const first = d3.min(D.pos, (p) => +pd(p.date)), t1 = d3.max(D.pos, (p) => +pd(p.date));
+      let t0 = l1 || (l2 && d1 ? l2 - d1 * 1000 : null) || +pd(S.session.date_start);
+      if (!(t0 > first && t0 < t1)) t0 = first;
       const by = d3.group(D.pos, (p) => p.driver_number);
       const series = [...by.entries()].map(([n, rows]) => {
-        const pts = rows.map((p) => ({ x: (+pd(p.date) - t0) / 60000, y: p.position })).sort((a, b) => a.x - b.x);
+        const all = rows.map((p) => ({ t: +pd(p.date), y: p.position })).sort((a, b) => a.t - b.t);
+        const grid = all.filter((p) => p.t <= t0).pop() || all[0];
+        const pts = [{ x: 0, y: grid.y }].concat(all.filter((p) => p.t > t0).map((p) => ({ x: (p.t - t0) / 60000, y: p.y })));
         pts.push({ x: (t1 - t0) / 60000, y: pts[pts.length - 1].y });
         const s = st.get(n);
         return s ? { ...s, points: pts } : { name: dcode(D.dm.get(n), n), muted: true, points: pts };
       });
       const maxP = d3.max(D.pos, (p) => p.position) || 20;
       C.lines($('chart-pos'), series, { height: 340, step: true, snap: false, invertY: true, yDomain: [1, maxP], yTickValues: d3.range(1, maxP + 1).filter((v) => v === 1 || v % 5 === 0),
-        yFmt: (v) => 'P' + v, xFmt: (v) => Math.round(v) + ' min', xTitle: 'Minutes since the start', aria: 'Track position over the session for the chosen drivers' });
+        yFmt: (v) => 'P' + v, xFmt: (v) => Math.round(v) + ' min', xTitle: 'Minutes since the race start', aria: 'Track position over the race for the chosen drivers' });
     }
     /* stints */
     const byD = d3.group(D.stints.filter((x) => x.lap_start != null && x.lap_end != null), (x) => x.driver_number);
