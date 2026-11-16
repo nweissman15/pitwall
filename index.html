@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pit Wall: Formula 1 timing and telemetry</title>
+<meta name="description" content="Unofficial Formula 1 dashboard: standings, session results, lap times, tyre strategy and car telemetry from the OpenF1 API.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#season">Pit Wall</a>
+  <nav aria-label="Sections">
+    <a href="#season" data-tab="season">Season</a>
+    <a href="#session" data-tab="session">Race weekend</a>
+    <a href="#telemetry" data-tab="telemetry">Telemetry</a>
+    <a href="#live" data-tab="live">Live</a>
+  </nav>
+  <span class="status" id="net-status" role="status" aria-live="polite"></span>
+</header>
+
+<main>
+  <!-- Season -->
+  <section id="view-season" class="view" hidden>
+    <div class="headline">
+      <h1 id="season-title">Season</h1>
+      <label class="pick">Year <select id="season-year"></select></label>
+    </div>
+    <p class="lede" id="season-lede"></p>
+    <div class="cols">
+      <article class="panel">
+        <h2>Drivers' championship</h2>
+        <p class="sub" id="drivers-sub"></p>
+        <div class="chart" id="chart-drivers"></div>
+      </article>
+      <article class="panel">
+        <h2>Constructors' championship</h2>
+        <p class="sub" id="teams-sub"></p>
+        <div class="chart" id="chart-teams"></div>
+      </article>
+    </div>
+    <article class="panel">
+      <h2>Calendar</h2>
+      <p class="sub">Pick a round to open its sessions.</p>
+      <div class="scroll"><table id="calendar"><thead><tr><th>Rd</th><th>Grand Prix</th><th>Circuit</th><th>Dates</th><th>Race winner</th><th></th></tr></thead><tbody></tbody></table></div>
+    </article>
+  </section>
+
+  <!-- Session -->
+  <section id="view-session" class="view" hidden>
+    <div class="headline">
+      <h1 id="session-title">Race weekend</h1>
+      <div class="picks">
+        <label class="pick">Year <select id="sel-year"></select></label>
+        <label class="pick">Grand Prix <select id="sel-meeting"></select></label>
+        <label class="pick">Session <select id="sel-session"></select></label>
+      </div>
+    </div>
+    <p class="lede" id="session-lede"></p>
+    <div class="tiles" id="weather-tiles"></div>
+    <article class="panel">
+      <h2>Classification</h2>
+      <div class="scroll"><table id="results"><thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th class="num">Laps</th><th class="num">Time / gap</th><th class="num">Best lap</th><th class="num">Stops</th></tr></thead><tbody></tbody></table></div>
+    </article>
+    <article class="panel">
+      <h2>Drivers to compare</h2>
+      <p class="sub">Up to six. The choice applies to the lap-time and position charts.</p>
+      <div class="chips" id="driver-chips" role="group" aria-label="Drivers to compare"></div>
+    </article>
+    <article class="panel">
+      <div class="panel-head">
+        <h2>Lap times</h2>
+        <label class="check"><input type="checkbox" id="show-slow"> Include pit and slow laps</label>
+      </div>
+      <div class="legend" id="legend-laps"></div>
+      <div class="chart" id="chart-laps"></div>
+    </article>
+    <article class="panel" id="panel-positions">
+      <h2>Track position</h2>
+      <p class="sub">Position over the session, by minutes since the start.</p>
+      <div class="legend" id="legend-pos"></div>
+      <div class="chart" id="chart-pos"></div>
+    </article>
+    <article class="panel">
+      <h2>Tyre strategy</h2>
+      <div class="legend" id="legend-tyres"></div>
+      <div class="chart" id="chart-stints"></div>
+    </article>
+    <article class="panel">
+      <h2>Race control</h2>
+      <ol class="feed" id="race-control"></ol>
+    </article>
+  </section>
+
+  <!-- Telemetry -->
+  <section id="view-telemetry" class="view" hidden>
+    <div class="headline">
+      <h1>Telemetry</h1>
+      <p class="context" id="tel-context"></p>
+    </div>
+    <p class="lede">Car data for one lap, sampled about four times a second. Add a second driver to compare lines through the lap.</p>
+    <div class="picks tel-picks">
+      <fieldset><legend><span class="swatch a"></span>Driver A</legend>
+        <select id="tel-a-driver" aria-label="Driver A"></select>
+        <select id="tel-a-lap" aria-label="Driver A lap"></select>
+      </fieldset>
+      <fieldset><legend><span class="swatch b"></span>Driver B</legend>
+        <select id="tel-b-driver" aria-label="Driver B"></select>
+        <select id="tel-b-lap" aria-label="Driver B lap"></select>
+      </fieldset>
+      <button id="tel-load" class="btn">Load telemetry</button>
+    </div>
+    <div class="tiles" id="tel-tiles"></div>
+    <div class="cols tel-cols">
+      <article class="panel">
+        <h2>Speed, throttle, brake, gear and revs</h2>
+        <p class="sub">By distance into the lap. Move over a chart to read all five at that point.</p>
+        <div id="tel-charts"></div>
+      </article>
+      <article class="panel">
+        <h2>Track map</h2>
+        <p class="sub" id="map-sub">Driver A's line, brighter where the car is faster.</p>
+        <div class="chart" id="tel-map"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- Live -->
+  <section id="view-live" class="view" hidden>
+    <div class="headline"><h1>Live timing</h1></div>
+    <p class="lede" id="live-lede"></p>
+    <div class="tiles" id="live-tiles"></div>
+    <article class="panel">
+      <h2 id="live-tower-title">Timing tower</h2>
+      <p class="sub" id="live-sub"></p>
+      <div class="scroll"><table id="tower"><thead><tr><th>Pos</th><th>Driver</th><th class="num">Gap</th><th class="num">Interval</th><th class="num">Last lap</th><th>Tyre</th></tr></thead><tbody></tbody></table></div>
+    </article>
+    <article class="panel">
+      <h2>Live data sign-in</h2>
+      <p class="sub">Data during a session needs a paid OpenF1 account. Without one, this page fills in shortly after each session ends. Your password is sent only to OpenF1 and is not saved; the sign-in lasts one hour or until you close the tab.</p>
+      <form id="live-form" class="signin">
+        <label>OpenF1 username <input id="live-user" autocomplete="username" required></label>
+        <label>Password <input id="live-pass" type="password" autocomplete="current-password" required></label>
+        <button class="btn" type="submit">Sign in</button>
+        <button class="btn quiet" type="button" id="live-out" hidden>Sign out</button>
+      </form>
+      <p class="sub" id="live-auth-msg" role="status"></p>
+      <p class="sub">OpenF1 currently withholds car telemetry, track location and intervals while a session runs, even for paid accounts. Those appear in the other tabs after the session.</p>
+    </article>
+  </section>
+</main>
+
+<footer>
+  <p>Unofficial. Not associated with Formula 1, the FIA or any team. Data from the <a href="https://openf1.org" rel="noopener">OpenF1 API</a>, 2023 onwards.</p>
+</footer>
+
+<div id="tip" class="tip" hidden></div>
+<script src="vendor/d3.min.js"></script>
+<script src="api.js"></script>
+<script src="charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
