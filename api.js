@@ -32,7 +32,7 @@
 
   async function raw(path) {
     for (let attempt = 0; attempt < 4; attempt++) {
-      await pace();
+      if (attempt) await (chain = chain.catch(() => {}).then(pace));
       const headers = { accept: 'application/json' };
       const t = token();
       if (t) headers.Authorization = 'Bearer ' + t;
@@ -60,11 +60,41 @@
   }
 
   /* path example: "laps?session_key=9161&driver_number=63". Use op() for comparisons. */
+  /* Finished sessions never change, so their data is kept in the browser between visits. */
+  let dbp = null;
+  function db() {
+    if (!dbp) dbp = new Promise((res) => {
+      try { const r = indexedDB.open('pitwall', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); }
+      catch (e) { res(null); }
+    });
+    return dbp;
+  }
+  async function kept(path) {
+    const d = await db(); if (!d) return null;
+    return new Promise((res) => { try { const q = d.transaction('kv').objectStore('kv').get(path); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); } catch (e) { res(null); } });
+  }
+  async function keep(path, data) {
+    const d = await db(); if (!d) return;
+    try { d.transaction('kv', 'readwrite').objectStore('kv').put(data, path); } catch (e) { /* storage full or blocked: carry on without it */ }
+  }
+
+  /* opts: fresh (skip caches), keep (store between visits), alive() (skip if the caller has moved on).
+     Requests start at most three a second but run side by side. */
   function get(path, opts) {
-    const fresh = opts && opts.fresh;
+    opts = opts || {};
+    const fresh = opts.fresh;
     if (!fresh && cache.has(path)) return cache.get(path);
     pending++; notify();
-    const p = (chain = chain.catch(() => {}).then(() => raw(path)));
+    const p = (async () => {
+      if (opts.keep && !fresh) { const hit = await kept(path); if (hit) return hit; }
+      await (chain = chain.catch(() => {}).then(async () => {
+        if (opts.alive && !opts.alive()) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
+        await pace();
+      }));
+      const data = await raw(path);
+      if (opts.keep && Array.isArray(data) && data.length) keep(path, data);
+      return data;
+    })();
     const out = p.finally(() => { pending--; notify(); });
     if (!fresh) { cache.set(path, out); out.catch(() => cache.delete(path)); }
     return out;

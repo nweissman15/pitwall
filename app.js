@@ -171,31 +171,49 @@
     const m = S.meetings.find((x) => x.meeting_key === s.meeting_key);
     $('session-title').textContent = (m ? m.meeting_name : s.country_name);
     $('session-lede').textContent = 'Loading ' + s.session_name.toLowerCase() + '…';
+    const alive = () => !!S.session && S.session.session_key === key;
+    const o = { keep: true, alive }, k = 'session_key=' + key, isRaceType = s.session_type === 'Race';
+    const soft = (p) => get(p, o).catch((e) => { if (e.live || e.cancelled) throw e; return []; });
     try {
-      const k = 'session_key=' + key;
-      const soft = (p) => get(p).catch((e) => { if (e.live) throw e; return []; });
-      const isRaceType = s.session_type === 'Race';
-      const [drivers, results, laps, stints, pits, weather, rc, pos, overtakes, radio] = await Promise.all([
-        get('drivers?' + k), soft('session_result?' + k), get('laps?' + k), soft('stints?' + k), soft('pit?' + k),
-        soft('weather?' + k), soft('race_control?' + k), soft('position?' + k), isRaceType ? soft('overtakes?' + k) : [], soft('team_radio?' + k)]);
-      if (!S.session || S.session.session_key !== key) return;
+      /* first the essentials, so the classification and lap times appear quickly */
+      const [drivers, results, laps] = await Promise.all([get('drivers?' + k, o), soft('session_result?' + k), get('laps?' + k, o)]);
+      if (!alive()) return;
       const dm = driverMap(drivers);
       const best = new Map();
       laps.forEach((l) => { if (l.lap_duration != null && (!best.has(l.driver_number) || l.lap_duration < best.get(l.driver_number))) best.set(l.driver_number, l.lap_duration); });
-      let order;
-      if (results.length) order = results.slice().sort((a, b) => (a.position == null) - (b.position == null) || a.position - b.position);
-      else {
-        const lastPos = new Map(); pos.forEach((p) => lastPos.set(p.driver_number, p.position));
-        order = drivers.map((d) => ({ driver_number: d.driver_number, position: lastPos.get(d.driver_number) })).sort((a, b) => (a.position || 99) - (b.position || 99));
-      }
-      S.data = { dm, results: order, hasResults: results.length > 0, laps, stints, pits, weather, rc, pos, best, overtakes, radio, isRace: isRaceType };
+      const order = results.length ? results.slice().sort((a, b) => (a.position == null) - (b.position == null) || a.position - b.position)
+        : drivers.map((d) => ({ driver_number: d.driver_number, position: null }));
+      const D = S.data = { key, dm, results: order, hasResults: results.length > 0, laps, best, isRace: isRaceType, ready: false,
+        stints: [], pits: [], weather: [], pos: [], rc: null, overtakes: isRaceType ? null : [], radio: null, asked: {} };
       const asked = want && want.drivers ? want.drivers.filter((n) => dm.has(n)).slice(0, 6) : [];
       S.selected = asked.length ? asked : order.slice(0, 4).map((r) => r.driver_number);
       renderSession(); if (current === 'session') setLink();
       if (current === 'telemetry') initTelemetry();
+      /* then strategy, stops, positions and weather */
+      const [stints, pits, pos, weather] = await Promise.all([soft('stints?' + k), soft('pit?' + k), isRaceType || !results.length ? soft('position?' + k) : [], soft('weather?' + k)]);
+      if (!alive()) return;
+      Object.assign(D, { stints, pits, pos, weather, ready: true });
+      if (!D.hasResults) {
+        const lastPos = new Map(); pos.forEach((p) => lastPos.set(p.driver_number, p.position));
+        D.results = drivers.map((d) => ({ driver_number: d.driver_number, position: lastPos.get(d.driver_number) })).sort((a, b) => (a.position || 99) - (b.position || 99));
+      }
+      renderSession(); lazyCheck();
     } catch (e) {
+      if (e.cancelled || !alive()) return;
       $('session-lede').textContent = e.message;
     }
+  }
+  /* Radio, overtakes and race control are fetched only when their panel scrolls into view. */
+  const LAZY = [['rc', 'race-control', 'race_control'], ['overtakes', 'chart-overtakes', 'overtakes'], ['radio', 'team-radio', 'team_radio']];
+  function lazyCheck() {
+    const D = S.data; if (!D || !D.ready || current !== 'session') return;
+    LAZY.forEach(([field, id, endpoint]) => {
+      if (D[field] !== null || D.asked[field]) return;
+      const r = $(id).getBoundingClientRect();
+      if (r.width === 0 || r.top > innerHeight + 300 || r.bottom < -300) return;
+      D.asked[field] = true;
+      get(endpoint + '?session_key=' + D.key, { keep: true, alive: () => S.data === D }).catch(() => []).then((rows) => { if (S.data !== D) return; D[field] = rows; renderSession(); });
+    });
   }
   function seriesStyle() {
     const D = S.data, seen = new Map(), out = new Map();
@@ -248,7 +266,7 @@
       const bl = el('td', 'num' + (b != null && b === overall ? ' best' : ''), fmtLap(b));
       if (b != null && b === overall) bl.title = 'Fastest lap of the session';
       tr.append(el('td', 'muted', r.position != null ? r.position : '–'), who, el('td', 'muted', (d && d.team_name) || ''), el('td', 'num', r.number_of_laps != null ? r.number_of_laps : (d3.max(D.laps.filter((l) => l.driver_number === r.driver_number), (l) => l.lap_number) || '–')),
-        el('td', 'num', gap), bl, el('td', 'num', D.isRace ? (stops.get(r.driver_number) || 0) : '–'));
+        el('td', 'num', gap), bl, el('td', 'num', !D.isRace ? '–' : D.ready ? (stops.get(r.driver_number) || 0) : '…'));
       tb.appendChild(tr);
     });
     /* chips */
@@ -295,18 +313,18 @@
     const quick = d3.min(stopsList, (p) => p.stop_duration);
     stopsList.forEach((p) => { const tr = el('tr'); tr.append(who(p.driver_number), el('td', 'num', p.lap_number != null ? p.lap_number : '–'),
       el('td', 'num' + (p.stop_duration != null && p.stop_duration === quick ? ' best' : ''), p.stop_duration != null ? p.stop_duration.toFixed(1) + ' s' : '–'), el('td', 'num', lane(p) != null ? lane(p).toFixed(1) + ' s' : '–')); pb.appendChild(tr); });
-    if (!stopsList.length) { const tr = el('tr'), td = el('td', 'muted', 'No pit stop times for this session.'); td.colSpan = 4; tr.appendChild(td); pb.appendChild(tr); }
+    if (!stopsList.length) { const tr = el('tr'), td = el('td', 'muted', D.ready ? 'No pit stop times for this session.' : 'Loading…'); td.colSpan = 4; tr.appendChild(td); pb.appendChild(tr); }
     /* team radio */
     const rf = $('team-radio'); rf.replaceChildren();
-    const clips = D.radio.filter((c) => S.selected.includes(c.driver_number) && /^https:\/\//.test(c.recording_url || '')).sort((x, y) => pd(y.date) - pd(x.date)).slice(0, 40);
-    if (!clips.length) rf.appendChild(el('li', 'muted', S.selected.length ? 'No radio clips published for these drivers.' : 'Choose a driver above.'));
+    const clips = (D.radio || []).filter((c) => S.selected.includes(c.driver_number) && /^https:\/\//.test(c.recording_url || '')).sort((x, y) => pd(y.date) - pd(x.date)).slice(0, 40);
+    if (!clips.length) rf.appendChild(el('li', 'muted', D.radio === null ? 'Loading…' : S.selected.length ? 'No radio clips published for these drivers.' : 'Choose a driver above.'));
     clips.forEach((c) => { const li = el('li'), au = document.createElement('audio'); au.controls = true; au.preload = 'none'; au.src = c.recording_url;
       au.setAttribute('aria-label', 'Radio from ' + dname(D.dm.get(c.driver_number), c.driver_number));
       li.append(el('time', '', pd(c.date).toISOString().slice(11, 16)), el('span', '', dcode(D.dm.get(c.driver_number), c.driver_number)), au); rf.appendChild(li); });
     /* race control */
     const feed = $('race-control'); feed.replaceChildren();
-    const msgs = D.rc.slice().sort((a, b) => pd(b.date) - pd(a.date)).slice(0, 250);
-    if (!msgs.length) feed.appendChild(el('li', 'muted', 'No race control messages for this session.'));
+    const msgs = (D.rc || []).slice().sort((a, b) => pd(b.date) - pd(a.date)).slice(0, 250);
+    if (!msgs.length) feed.appendChild(el('li', 'muted', D.rc === null ? 'Loading…' : 'No race control messages for this session.'));
     msgs.forEach((m) => {
       const li = el('li'); const t = el('time', '', m.lap_number ? 'Lap ' + m.lap_number : pd(m.date).toISOString().slice(11, 16));
       const f = el('span', 'flag ' + String(m.flag || '').split(' ')[0], m.flag ? String(m.flag).toLowerCase() : String(m.category || '').toLowerCase());
@@ -368,8 +386,9 @@
       stints: byD.get(r.driver_number).sort((a, b) => a.stint_number - b.stint_number).map((x) => ({ from: x.lap_start, to: x.lap_end, compound: x.compound, age: x.tyre_age_at_start })) }));
     const comps = [...new Set(D.stints.map((x) => String(x.compound || '').toUpperCase()))].filter(Boolean);
     legend('legend-tyres', comps.map((c) => ({ box: true, color: C.tyre(c)[0], label: C.tyre(c)[1] + ' = ' + c.toLowerCase() })));
-    C.stints($('chart-stints'), rows, d3.max(D.stints, (x) => x.lap_end) || 1, 'Tyre stints by driver and lap');
-    if (D.isRace) {
+    if (D.ready) C.stints($('chart-stints'), rows, d3.max(D.stints, (x) => x.lap_end) || 1, 'Tyre stints by driver and lap'); else C.note($('chart-stints'), 'Loading…');
+    if (D.isRace && D.overtakes === null) C.note($('chart-overtakes'), 'Loading…');
+    else if (D.isRace) {
       const made = d3.rollup(D.overtakes, (v) => v.length, (o) => o.overtaking_driver_number), lost = d3.rollup(D.overtakes, (v) => v.length, (o) => o.overtaken_driver_number);
       C.hbars($('chart-overtakes'), [...made.entries()].sort((x, y) => y[1] - x[1]).map(([n, v]) => { const d = D.dm.get(n);
         return { label: dcode(d, n), value: v, color: C.ink(d && d.team_colour), tip: [{ label: 'Driver', value: dname(d, n) }, { label: 'Places taken', value: v }, { label: 'Places lost', value: lost.get(n) || 0 }] }; }),
@@ -435,7 +454,7 @@
     const lap = S.data.laps.find((l) => l.driver_number === n && l.lap_number === lapNo);
     const t0 = pd(lap.date_start), t1 = new Date(+t0 + lap.lap_duration * 1000);
     const q = 'session_key=' + S.session.session_key + '&driver_number=' + n + '&' + op('date', '>=', t0.toISOString()) + '&' + op('date', '<', t1.toISOString());
-    const [car, loc] = await Promise.all([get('car_data?' + q), withLoc ? get('location?' + q).catch(() => []) : []]);
+    const [car, loc] = await Promise.all([get('car_data?' + q, { keep: true }), withLoc ? get('location?' + q, { keep: true }).catch(() => []) : []]);
     const rows = car.map((c) => ({ ...c, t: +pd(c.date) })).sort((a, b) => a.t - b.t);
     let dist = 0;
     rows.forEach((r, i) => { if (i) dist += ((r.speed + rows[i - 1].speed) / 2 / 3.6) * (r.t - rows[i - 1].t) / 1000; r.dist = dist; });
@@ -661,7 +680,7 @@
     document.querySelectorAll('.view').forEach((v) => { v.hidden = v.id !== 'view-' + name; });
     document.querySelectorAll('nav a').forEach((a) => { if (a.dataset.tab === name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     if (name === 'season') { if (!started.season) { started.season = true; loadSeason(); } else renderSeason(); }
-    if (name === 'session') { if (!S.started) initPickers(); else if (S.data) renderSessionCharts(); }
+    if (name === 'session') { if (!S.started) initPickers(); else if (S.data) { renderSessionCharts(); lazyCheck(); } }
     if (name === 'drivers') { if (!drv.started) initDrivers(); else renderDriver(); }
     if (name === 'telemetry') initTelemetry();
     if (name === 'live') initLive();
@@ -700,6 +719,7 @@
   let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => {
     if (current === 'season') renderSeason(); if (current === 'session') renderSessionCharts(); if (current === 'telemetry' && tel.last) renderTelemetry(); if (current === 'drivers') renderDriver();
   }, 200); });
+  let sc = false; window.addEventListener('scroll', () => { if (sc) return; sc = true; requestAnimationFrame(() => { sc = false; lazyCheck(); }); }, { passive: true });
   window.addEventListener('hashchange', route);
   route();
 })();
