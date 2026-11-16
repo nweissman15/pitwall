@@ -80,22 +80,31 @@
     const yt = opts.yTickValues || y.ticks(opts.yTicks || 5);
     const named = series.filter((s) => !s.muted);
     const withLabels = opts.labels !== false && named.length <= 6 && named.length > 1;
-    const m = { t: 10, b: opts.xTitle ? 38 : 24, l: opts.left || textWidth(svg, '', yt.map(yFmt)) + 10, r: withLabels ? textWidth(svg, 'lbl', named.map((s) => s.name)) + 12 : 12 };
+    const marks = opts.marks || [];
+    const m = { t: marks.length ? 22 : 10, b: opts.xTitle ? 38 : 24, l: opts.left || textWidth(svg, '', yt.map(yFmt)) + 10, r: withLabels ? textWidth(svg, 'lbl', named.map((s) => s.name)) + 12 : 12 };
     y.range([H - m.b, m.t]);
     const x = d3.scaleLinear().domain(opts.xDomain || d3.extent(all, (p) => p.x)).range([m.l, W - m.r]);
     const g = svg.append('g');
     g.selectAll('line').data(yt).join('line').attr('class', 'gridline').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y);
     g.selectAll('text').data(yt).join('text').attr('x', m.l - 8).attr('y', y).attr('dy', '.32em').attr('text-anchor', 'end').text(yFmt);
-    const xt = x.ticks(Math.max(2, Math.floor((W - m.l - m.r) / 80)));
+    const xt = x.ticks(Math.max(2, Math.floor((W - m.l - m.r) / 80))).filter((t) => !opts.xInt || Number.isInteger(t));
     const gx = svg.append('g');
     gx.selectAll('text').data(xt).join('text').attr('x', x).attr('y', H - m.b + 16).attr('text-anchor', 'middle').text(xFmt);
     if (opts.xTitle) gx.append('text').attr('x', (m.l + W - m.r) / 2).attr('y', H - 4).attr('text-anchor', 'middle').text(opts.xTitle);
     if (opts.zero && y.domain()[0] * y.domain()[1] <= 0) g.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', '#8a919d');
+    if (marks.length) {
+      let lastX = -99; const gm = svg.append('g');
+      marks.slice().sort((p, q) => p.x - q.x).forEach((k) => {
+        const px = x(k.x); if (px < m.l || px > W - m.r) return;
+        gm.append('line').attr('x1', px).attr('x2', px).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#22304d');
+        if (px - lastX >= 16) { gm.append('text').attr('x', px).attr('y', m.t - 8).attr('text-anchor', 'middle').text(k.label); lastX = px; }
+      });
+    }
     const line = d3.line().defined((p) => p.y != null).x((p) => x(p.x)).y((p) => y(p.y));
     if (opts.step) line.curve(d3.curveStepAfter);
     const ordered = series.filter((s) => s.muted).concat(named);
     svg.append('g').selectAll('path').data(ordered).join('path').attr('fill', 'none')
-      .attr('stroke', (s) => s.muted ? '#4a515d' : s.color).attr('stroke-width', (s) => s.muted ? 1 : 2)
+      .attr('stroke', (s) => s.muted ? '#3a4a6b' : s.color).attr('stroke-width', (s) => s.muted ? 1 : 2)
       .attr('stroke-dasharray', (s) => s.dash ? '5 4' : null).attr('stroke-linejoin', 'round').attr('d', (s) => line(s.points));
     if (withLabels) {
       const ends = named.map((s) => { const p = s.points.filter((q) => q.y != null).pop(); return { s, y: y(p.y) }; }).sort((a, b) => a.y - b.y);
@@ -110,7 +119,7 @@
     function setX(xv) {
       if (xv == null) { cursor.style('display', 'none'); dots.selectAll('*').remove(); return; }
       cursor.style('display', null).attr('x1', x(xv)).attr('x2', x(xv));
-      dots.selectAll('circle').data(at(xv)).join('circle').attr('r', 4).attr('fill', (d) => d.s.color).attr('stroke', '#1c2027').attr('stroke-width', 2)
+      dots.selectAll('circle').data(at(xv)).join('circle').attr('r', 4).attr('fill', (d) => d.s.color).attr('stroke', '#0b1120').attr('stroke-width', 2)
         .attr('cx', (d) => opts.snap === false ? x(xv) : x(d.p.x)).attr('cy', (d) => y(d.p.y));
     }
     svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', Math.max(1, W - m.l - m.r)).attr('height', H - m.t - m.b).attr('fill', 'transparent')
@@ -148,13 +157,13 @@
         { label: 'Tyre age at start', value: (d.s.age || 0) + ' laps' }]))
       .on('pointerleave', hideTip);
     seg.filter((d) => x(d.s.to) - x(d.s.from - 1) > 18).append('text').attr('x', (d) => (x(d.s.from - 1) + x(d.s.to)) / 2).attr('y', rh / 2).attr('dy', '.35em')
-      .attr('text-anchor', 'middle').style('fill', '#14171c').style('font-weight', 600).style('pointer-events', 'none').text((d) => tyre(d.s.compound)[1]);
+      .attr('text-anchor', 'middle').style('fill', '#070b14').style('font-weight', 600).style('pointer-events', 'none').text((d) => tyre(d.s.compound)[1]);
     const ticks = x.ticks(Math.max(2, Math.floor((W - left) / 70))).filter((t) => t > 0);
     svg.append('g').selectAll('text').data(ticks).join('text').attr('x', x).attr('y', H - 6).attr('text-anchor', 'middle').text((t) => 'Lap ' + t);
   }
 
   /* Track map: pts=[{x,y,speed,dist}], brighter = faster. Returns {setDist(d)} */
-  function trackMap(el, pts, aria) {
+  function trackMap(el, pts, aria, corners) {
     el.replaceChildren();
     if (pts.length < 10) { note(el, 'No track position data for this lap.'); return { setDist() {} }; }
     const W = Math.max(260, el.clientWidth), H = Math.min(W, 420), pad = 16;
@@ -173,7 +182,11 @@
     svg.append('rect').attr('x', pad + 60).attr('y', H - 14).attr('width', 120).attr('height', 6).attr('rx', 3).attr('fill', 'url(#spd)');
     svg.append('text').attr('x', pad + 54).attr('y', H - 8).attr('text-anchor', 'end').text(Math.round(sp[0]) + ' km/h');
     svg.append('text').attr('x', pad + 186).attr('y', H - 8).text(Math.round(sp[1]) + ' km/h');
-    const dot = svg.append('circle').attr('r', 7).attr('fill', '#fff').attr('stroke', '#14171c').attr('stroke-width', 2).style('display', 'none');
+    (corners || []).forEach((k) => {
+      const cx = W / 2, cy = (H - 24) / 2, dx = px(k) - cx, dy = py(k) - cy, len = Math.hypot(dx, dy) || 1;
+      svg.append('text').attr('class', 'lbl').attr('x', px(k) + dx / len * 14).attr('y', py(k) + dy / len * 14).attr('dy', '.35em').attr('text-anchor', 'middle').text(k.label);
+    });
+    const dot = svg.append('circle').attr('r', 7).attr('fill', '#fff').attr('stroke', '#070b14').attr('stroke-width', 2).style('display', 'none');
     const bis = d3.bisector((p) => p.dist).center;
     function setDist(d) {
       if (d == null) return dot.style('display', 'none');

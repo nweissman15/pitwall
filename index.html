@@ -7,9 +7,9 @@
 <meta name="description" content="Unofficial Formula 1 dashboard: standings, session results, lap times, tyre strategy and car telemetry from the OpenF1 API.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <header class="top">
@@ -18,6 +18,7 @@
     <a href="#season" data-tab="season">Season</a>
     <a href="#session" data-tab="session">Race weekend</a>
     <a href="#telemetry" data-tab="telemetry">Telemetry</a>
+    <a href="#drivers" data-tab="drivers">Drivers</a>
     <a href="#live" data-tab="live">Live</a>
   </nav>
   <span class="status" id="net-status" role="status" aria-live="polite"></span>
@@ -97,6 +98,28 @@
       <div class="chart" id="chart-stints"></div>
     </article>
     <article class="panel">
+      <h2>Best sectors and top speed</h2>
+      <p class="sub">Each driver's quickest time through every sector, the lap those would add up to, and their highest speed-trap reading. Purple marks the best in the session.</p>
+      <div class="scroll"><table id="sectors"><thead><tr><th>Driver</th><th class="num">Sector 1</th><th class="num">Sector 2</th><th class="num">Sector 3</th><th class="num">Ideal lap</th><th class="num">Best lap</th><th class="num">Speed trap</th></tr></thead><tbody></tbody></table></div>
+    </article>
+    <div class="cols" id="race-extras">
+      <article class="panel" id="panel-pits">
+        <h2>Pit stops</h2>
+        <p class="sub">Quickest first, by time spent in the pit lane.</p>
+        <div class="scroll tall"><table id="pits"><thead><tr><th>Driver</th><th class="num">Lap</th><th class="num">Stationary</th><th class="num">Pit lane</th></tr></thead><tbody></tbody></table></div>
+      </article>
+      <article class="panel" id="panel-overtakes">
+        <h2>Overtakes</h2>
+        <p class="sub">Places taken from another driver, on track or through pit stops and penalties.</p>
+        <div class="chart" id="chart-overtakes"></div>
+      </article>
+    </div>
+    <article class="panel">
+      <h2>Team radio</h2>
+      <p class="sub">Broadcast radio clips for the drivers chosen above, newest first. Only a selection of messages is published.</p>
+      <ol class="feed radio" id="team-radio"></ol>
+    </article>
+    <article class="panel">
       <h2>Race control</h2>
       <ol class="feed" id="race-control"></ol>
     </article>
@@ -119,6 +142,7 @@
         <select id="tel-b-lap" aria-label="Driver B lap"></select>
       </fieldset>
       <button id="tel-load" class="btn">Load telemetry</button>
+      <button id="copy-link" class="btn quiet" type="button">Copy link to this view</button>
     </div>
     <div class="tiles" id="tel-tiles"></div>
     <div class="cols tel-cols">
@@ -130,9 +154,40 @@
       <article class="panel">
         <h2>Track map</h2>
         <p class="sub" id="map-sub">Driver A's line, brighter where the car is faster.</p>
+        <p class="sub" id="corner-note" hidden>Numbers mark the corners.</p>
         <div class="chart" id="tel-map"></div>
       </article>
     </div>
+  </section>
+
+  <!-- Drivers -->
+  <section id="view-drivers" class="view" hidden>
+    <div class="headline">
+      <h1 id="drv-title">Drivers</h1>
+      <div class="picks">
+        <label class="pick">Year <select id="drv-year"></select></label>
+        <label class="pick">Driver <select id="drv-driver"></select></label>
+      </div>
+    </div>
+    <p class="lede" id="drv-lede"></p>
+    <div class="tiles" id="drv-tiles"></div>
+    <div class="cols">
+      <article class="panel">
+        <h2>Qualifying and race results</h2>
+        <p class="sub">Position at each round. Higher is better.</p>
+        <div class="legend" id="legend-drv"></div>
+        <div class="chart" id="chart-drv-pos"></div>
+      </article>
+      <article class="panel">
+        <h2>Championship points</h2>
+        <p class="sub">Running total after each race and sprint.</p>
+        <div class="chart" id="chart-drv-pts"></div>
+      </article>
+    </div>
+    <article class="panel">
+      <h2>Round by round</h2>
+      <div class="scroll"><table id="drv-rounds"><thead><tr><th>Rd</th><th>Grand Prix</th><th class="num">Qualifying</th><th class="num">Race</th><th class="num">Teammate's race</th></tr></thead><tbody></tbody></table></div>
+    </article>
   </section>
 
   <!-- Live -->
@@ -165,9 +220,9 @@
 </footer>
 
 <div id="tip" class="tip" hidden></div>
-<script src="vendor/d3.min.js?v=4"></script>
-<script src="api.js?v=4"></script>
-<script src="charts.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="vendor/d3.min.js?v=5"></script>
+<script src="api.js?v=5"></script>
+<script src="charts.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
